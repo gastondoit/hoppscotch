@@ -1,41 +1,76 @@
 <template>
   <AppPaneLayout layout-id="sse">
     <template #primary>
-      <div
-        class="sticky top-0 z-10 flex flex-shrink-0 space-x-2 overflow-x-auto bg-primary p-4"
-      >
-        <div class="sm:inline-flex flex-1 sm:space-x-2 sm:space-y-0 space-y-2">
-          <div class="flex flex-1 flex-col space-y-1 sm:space-y-0 sm:flex-row">
-            <input
-              id="server"
-              v-model="server"
-              type="url"
-              autocomplete="off"
-              :class="{ error: !isUrlValid }"
-              class="flex w-full flex-1 rounded-l border border-divider bg-primaryLight px-4 py-2 text-secondaryDark"
-              :placeholder="t('sse.url')"
-              :disabled="
-                connectionState === 'STARTED' || connectionState === 'STARTING'
-              "
-              @keyup.enter="isUrlValid ? toggleSSEConnection() : null"
-            />
-            <div class="flex flex-1">
-              <label
-                for="event-type"
-                class="truncate border-b border-t border-divider bg-primaryLight px-4 py-2 font-semibold text-secondaryLight"
-              >
-                {{ t("sse.event_type") }}
+      <div class="flex flex-1 flex-col">
+        <div
+          class="sticky top-0 z-10 flex flex-shrink-0 space-x-2 overflow-x-auto bg-primary p-4"
+        >
+          <div class="flex flex-1 whitespace-nowrap rounded border border-divider">
+            <div class="relative flex">
+              <label for="method">
+                <tippy
+                  interactive
+                  trigger="click"
+                  theme="popover"
+                  :on-shown="() => methodTippyActions.focus()"
+                >
+                  <HoppSmartSelectWrapper>
+                    <input
+                      id="method"
+                      class="flex w-26 cursor-pointer rounded-l bg-primaryLight px-4 py-2 font-semibold text-secondaryDark transition"
+                      :value="request.method"
+                      :readonly="request.method !== 'CUSTOM'"
+                      :placeholder="`${t('request.method')}`"
+                      :style="{
+                        color: getMethodLabelColor(request.method),
+                      }"
+                      :disabled="
+                        connectionState === 'STARTED' ||
+                        connectionState === 'STARTING'
+                      "
+                      @input="onSelectMethod($event)"
+                    />
+                  </HoppSmartSelectWrapper>
+                  <template #content="{ hide }">
+                    <div
+                      ref="methodTippyActions"
+                      class="flex flex-col focus:outline-none"
+                      tabindex="0"
+                      @keyup.escape="hide()"
+                    >
+                      <HoppSmartItem
+                        v-for="(method, index) in methods"
+                        :key="`method-${index}`"
+                        :label="method"
+                        :style="{
+                          color: getMethodLabelColor(method),
+                        }"
+                        @click="
+                          () => {
+                            updateMethod(method)
+                            hide()
+                          }
+                        "
+                      />
+                    </div>
+                  </template>
+                </tippy>
               </label>
-              <input
-                id="event-type"
-                v-model="eventType"
-                class="flex w-full flex-1 rounded-r border border-divider bg-primaryLight px-4 py-2 text-secondaryDark"
-                spellcheck="false"
-                :disabled="
+            </div>
+            <div
+              class="flex flex-1 whitespace-nowrap rounded-r border-l border-divider bg-primaryLight transition"
+              :class="{ error: !isUrlValid }"
+            >
+              <SmartEnvInput
+                v-model="request.endpoint"
+                :placeholder="t('sse.url')"
+                :auto-complete-env="true"
+                :envs="envs"
+                :readonly="
                   connectionState === 'STARTED' ||
                   connectionState === 'STARTING'
                 "
-                @keyup.enter="isUrlValid ? toggleSSEConnection() : null"
+                @enter="isUrlValid ? toggleSSEConnection() : null"
               />
             </div>
           </div>
@@ -55,6 +90,13 @@
             @click="toggleSSEConnection"
           />
         </div>
+
+        <HttpRequestOptions
+          v-model="request"
+          v-model:option-tab="optionTabPreference"
+          :properties="['params', 'bodyParams', 'headers', 'authorization']"
+          :envs="envs"
+        />
       </div>
     </template>
     <template #secondary>
@@ -68,14 +110,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onUnmounted, onMounted } from "vue"
+import { ref, watch, onUnmounted, onMounted, computed } from "vue"
 import "splitpanes/dist/splitpanes.css"
 import { debounce } from "lodash-es"
 import {
-  SSEEndpoint$,
-  setSSEEndpoint,
-  SSEEventType$,
-  setSSEEventType,
+  SSERequest$,
+  setSSERequest,
+  SSEOptionTab$,
+  setSSEOptionTab,
   SSESocket$,
   setSSESocket,
   SSELog$,
@@ -92,6 +134,11 @@ import {
 import { SSEConnection } from "@helpers/realtime/SSEConnection"
 import RegexWorker from "@workers/regex?worker"
 import { LogEntryData } from "~/components/realtime/Log.vue"
+import { getMethodLabelColor } from "~/helpers/rest/labelColoring"
+import { aggregateEnvsWithCurrentValue$ } from "~/newstore/environments"
+import { getEffectiveRESTRequest } from "~/helpers/utils/EffectiveURL"
+import { Environment } from "@hoppscotch/data"
+import { getDefaultRESTRequest } from "~/helpers/rest/default"
 
 const t = useI18n()
 const toast = useToast()
@@ -99,19 +146,42 @@ const { subscribeToStream } = useStreamSubscriber()
 
 const sse = useStream(SSESocket$, new SSEConnection(), setSSESocket)
 const connectionState = useReadonlyStream(sse.value.connectionState$, "STOPPED")
-const server = useStream(SSEEndpoint$, "", setSSEEndpoint)
-const eventType = useStream(SSEEventType$, "", setSSEEventType)
+const defaultRequest = {
+  ...getDefaultRESTRequest(),
+  endpoint: "https://express-eventsource.herokuapp.com/events",
+  name: "SSE",
+}
+const request = useStream(SSERequest$, defaultRequest, setSSERequest)
+const optionTabPreference = useStream(SSEOptionTab$, "params", setSSEOptionTab)
 const log = useStream(SSELog$, [], setSSELog)
+const envs = useReadonlyStream(aggregateEnvsWithCurrentValue$, [])
 
 const isUrlValid = ref(true)
 
+const methods = [
+  "GET",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "HEAD",
+  "OPTIONS",
+  "CONNECT",
+  "TRACE",
+  "CUSTOM",
+]
+
+const methodTippyActions = ref<any | null>(null)
+
 let worker: Worker
 
+const endpoint = computed(() => request.value.endpoint)
+
 const debouncer = debounce(function () {
-  worker.postMessage({ type: "sse", url: server.value })
+  worker.postMessage({ type: "sse", url: endpoint.value })
 }, 1000)
 
-watch(server, (url) => {
+watch(endpoint, (url) => {
   if (url) debouncer()
 })
 
@@ -120,7 +190,7 @@ const workerResponseHandler = ({
 }: {
   data: { url: string; result: boolean }
 }) => {
-  if (data.url === server.value) isUrlValid.value = data.result
+  if (data.url === endpoint.value) isUrlValid.value = data.result
 }
 
 onMounted(() => {
@@ -132,7 +202,7 @@ onMounted(() => {
       case "STARTING":
         log.value = [
           {
-            payload: `${t("state.connecting_to", { name: server.value })}`,
+            payload: `${t("state.connecting_to", { name: endpoint.value })}`,
             source: "info",
             color: "var(--accent-color)",
             ts: undefined,
@@ -143,7 +213,7 @@ onMounted(() => {
       case "STARTED":
         log.value = [
           {
-            payload: `${t("state.connected_to", { name: server.value })}`,
+            payload: `${t("state.connected_to", { name: endpoint.value })}`,
             source: "info",
             color: "var(--accent-color)",
             ts: Date.now(),
@@ -154,7 +224,8 @@ onMounted(() => {
 
       case "MESSAGE_RECEIVED":
         addSSELogLine({
-          payload: event.message,
+          prefix: `[${event.event ?? "message"}]`,
+          payload: event.data,
           source: "server",
           ts: event.time,
         })
@@ -162,7 +233,10 @@ onMounted(() => {
 
       case "ERROR":
         addSSELogLine({
-          payload: t("error.browser_support_sse").toString(),
+          payload:
+            event.error.status !== undefined
+              ? `${event.error.message} (${event.error.status} ${event.error.statusText ?? ""})`.trim()
+              : event.error.message,
           source: "info",
           color: "#ff5555",
           ts: event.time,
@@ -172,7 +246,7 @@ onMounted(() => {
       case "STOPPED":
         addSSELogLine({
           payload: t("state.disconnected_from", {
-            name: server.value,
+            name: endpoint.value,
           }).toString(),
           source: "disconnected",
           color: "#ff5555",
@@ -189,10 +263,31 @@ onMounted(() => {
 const toggleSSEConnection = () => {
   // If it is connecting:
   if (connectionState.value === "STOPPED") {
-    return sse.value.start(server.value, eventType.value)
+    const variables: Environment["variables"] = envs.value.map((v) => ({
+      key: v.key,
+      currentValue: v.currentValue,
+      initialValue: v.initialValue,
+      secret: v.secret,
+    }))
+
+    return getEffectiveRESTRequest(request.value, {
+      v: 2,
+      id: "env-id",
+      name: "Env",
+      variables,
+    }).then((effectiveReq) => sse.value.start(effectiveReq))
   }
   // Otherwise, it's disconnecting.
   sse.value.stop()
+}
+
+const updateMethod = (method: string) => {
+  request.value.method = method
+}
+
+const onSelectMethod = (ev: Event) => {
+  const val = (ev.target as HTMLInputElement).value
+  updateMethod(val.toUpperCase())
 }
 
 onUnmounted(() => {
