@@ -5,25 +5,26 @@ import {
   HoppRealtimeLogLine,
 } from "~/helpers/types/HoppRealtimeLog"
 import { SSEConnection } from "~/helpers/realtime/SSEConnection"
-
-type HoppSSERequest = {
-  endpoint: string
-  eventType: string
-}
+import { HoppRESTRequest } from "@hoppscotch/data"
+import { getDefaultRESTRequest } from "~/helpers/rest/default"
+import type { RESTOptionTabs } from "~/components/http/RequestOptions.vue"
 
 type HoppSSESession = {
-  request: HoppSSERequest
+  request: HoppRESTRequest
+  optionTabPreference: RESTOptionTabs
   log: HoppRealtimeLog
   socket: SSEConnection
 }
 
-const defaultSSERequest: HoppSSERequest = {
+const defaultSSERequest: HoppRESTRequest = {
+  ...getDefaultRESTRequest(),
   endpoint: "https://express-eventsource.herokuapp.com/events",
-  eventType: "data",
+  name: "SSE",
 }
 
 const defaultSSESession: HoppSSESession = {
   request: defaultSSERequest,
+  optionTabPreference: "params",
   socket: new SSEConnection(),
   log: [],
 }
@@ -31,7 +32,7 @@ const defaultSSESession: HoppSSESession = {
 const dispatchers = defineDispatchers({
   setRequest(
     _: HoppSSESession,
-    { newRequest }: { newRequest: HoppSSERequest }
+    { newRequest }: { newRequest: HoppRESTRequest }
   ) {
     return {
       request: newRequest,
@@ -40,17 +41,25 @@ const dispatchers = defineDispatchers({
   setEndpoint(curr: HoppSSESession, { newEndpoint }: { newEndpoint: string }) {
     return {
       request: {
-        eventType: curr.request.eventType,
+        ...curr.request,
         endpoint: newEndpoint,
       },
     }
   },
-  setEventType(curr: HoppSSESession, { newType }: { newType: string }) {
+  setMethod(curr: HoppSSESession, { newMethod }: { newMethod: string }) {
     return {
       request: {
-        endpoint: curr.request.endpoint,
-        eventType: newType,
+        ...curr.request,
+        method: newMethod,
       },
+    }
+  },
+  setOptionTab(
+    _: HoppSSESession,
+    { optionTab }: { optionTab: RESTOptionTabs }
+  ) {
+    return {
+      optionTabPreference: optionTab,
     }
   },
   setSocket(_: HoppSSESession, { socket }: { socket: SSEConnection }) {
@@ -72,7 +81,7 @@ const dispatchers = defineDispatchers({
 
 const SSESessionStore = new DispatchingStore(defaultSSESession, dispatchers)
 
-export function setSSERequest(newRequest?: HoppSSERequest) {
+export function setSSERequest(newRequest?: HoppRESTRequest) {
   SSESessionStore.dispatch({
     dispatcher: "setRequest",
     payload: {
@@ -90,11 +99,20 @@ export function setSSEEndpoint(newEndpoint: string) {
   })
 }
 
-export function setSSEEventType(newType: string) {
+export function setSSEMethod(newMethod: string) {
   SSESessionStore.dispatch({
-    dispatcher: "setEventType",
+    dispatcher: "setMethod",
     payload: {
-      newType,
+      newMethod,
+    },
+  })
+}
+
+export function setSSEOptionTab(optionTab: RESTOptionTabs) {
+  SSESessionStore.dispatch({
+    dispatcher: "setOptionTab",
+    payload: {
+      optionTab,
     },
   })
 }
@@ -136,13 +154,13 @@ export const SSEEndpoint$ = SSESessionStore.subject$.pipe(
   distinctUntilChanged()
 )
 
-export const SSEEventType$ = SSESessionStore.subject$.pipe(
-  pluck("request", "eventType"),
+export const SSEMethod$ = SSESessionStore.subject$.pipe(
+  pluck("request", "method"),
   distinctUntilChanged()
 )
 
-export const SSEConnectingState$ = SSESessionStore.subject$.pipe(
-  pluck("connectingState"),
+export const SSEOptionTab$ = SSESessionStore.subject$.pipe(
+  pluck("optionTabPreference"),
   distinctUntilChanged()
 )
 
