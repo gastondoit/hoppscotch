@@ -17,7 +17,7 @@
 
     <div v-else-if="response" class="flex flex-1 flex-col">
       <div
-        v-if="response.type === 'loading' || isLoading"
+        v-if="(response.type === 'loading' || isLoading) && response.type !== 'streaming'"
         class="flex flex-col items-center justify-center"
       >
         <HoppSmartSpinner class="my-4" />
@@ -80,7 +80,9 @@
       </HoppSmartPlaceholder>
       <div
         v-if="
-          (response.type === 'success' || response.type === 'fail') &&
+          (response.type === 'success' ||
+            response.type === 'fail' ||
+            response.type === 'streaming') &&
           !isLoading
         "
         class="flex items-center text-tiny font-semibold"
@@ -179,7 +181,8 @@ const readableResponseSize = computed(() => {
   )
     return undefined
 
-  const size = props.response.meta.responseSize
+  const size = props.response.meta?.responseSize
+  if (!size) return undefined
 
   if (size >= 100000) return (size / 1000000).toFixed(2) + " MB"
   if (size >= 1000) return (size / 1000).toFixed(2) + " KB"

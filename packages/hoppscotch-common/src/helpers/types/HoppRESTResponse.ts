@@ -17,8 +17,8 @@ export type HoppRESTSuccessResponse = {
   req: HoppRESTRequest
 }
 
-export type HoppRESTFailureResponse = {
-  type: "failure"
+export type HoppRESTFailResponse = {
+  type: "fail"
   headers: HoppRESTResponseHeader[]
   body: ArrayBuffer
   statusCode: number
@@ -26,6 +26,20 @@ export type HoppRESTFailureResponse = {
   meta: {
     responseSize: number // in bytes
     responseDuration: number // in millis
+  }
+  req: HoppRESTRequest
+}
+
+export type HoppRESTStreamingResponse = {
+  type: "streaming"
+  streamKind: "sse"
+  headers: HoppRESTResponseHeader[]
+  statusCode: number
+  statusText: string
+  bodyText: string
+  meta: {
+    responseSize?: number // in bytes
+    responseDuration?: number // in millis
   }
   req: HoppRESTRequest
 }
@@ -41,14 +55,14 @@ export type HoppRESTFailureScript = {
   error: Error
 }
 
-export type HoppRESTErrorExtension = {
+export type HoppRESTExtensionErrorResponse = {
   type: "extension_error"
   error: string
   component: Component
   req: HoppRESTRequest
 }
 
-export type HoppRESTErrorInterceptor = {
+export type HoppRESTInterceptorErrorResponse = {
   type: "interceptor_error"
   error: KernelInterceptorError
   req: HoppRESTRequest
@@ -61,9 +75,10 @@ export type HoppRESTLoadingResponse = {
 
 export type HoppRESTResponse =
   | HoppRESTLoadingResponse
+  | HoppRESTStreamingResponse
   | HoppRESTSuccessResponse
-  | HoppRESTFailureResponse
+  | HoppRESTFailResponse
   | HoppRESTFailureNetwork
   | HoppRESTFailureScript
-  | HoppRESTFailureExtension
-  | HoppRESTFailureInterceptor
+  | HoppRESTExtensionErrorResponse
+  | HoppRESTInterceptorErrorResponse

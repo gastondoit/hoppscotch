@@ -308,7 +308,10 @@ const curlText = ref("")
 const loading = ref(false)
 
 const isTabResponseLoading = computed(
-  () => loading.value || tab.value.document.response?.type === "loading"
+  () =>
+    loading.value ||
+    tab.value.document.response?.type === "loading" ||
+    tab.value.document.response?.type === "streaming"
 )
 
 const showCurlImportModal = ref(false)

@@ -3,10 +3,14 @@
     <HttpResponseMeta
       :response="doc.response"
       :is-embed="isEmbed"
-      :is-loading="loading"
+      :is-loading="loading && doc.response?.type !== 'streaming'"
+    />
+    <HttpSSEStream
+      v-if="doc.response?.type === 'streaming'"
+      :response="doc.response"
     />
     <LensesResponseBodyRenderer
-      v-if="!loading && hasResponse"
+      v-else-if="!loading && hasResponse"
       v-model:document="doc"
       :is-editable="false"
       :tab-id="tabId"
